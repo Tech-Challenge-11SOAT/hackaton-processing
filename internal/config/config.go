@@ -59,7 +59,8 @@ type RabbitMQConfig struct {
 // S3Config contains object storage settings.
 type S3Config struct {
 	Region          string
-	Bucket          string
+	InputBucket     string
+	OutputBucket    string
 	Endpoint        string
 	AccessKeyID     string
 	SecretAccessKey string
@@ -144,7 +145,11 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	s3Bucket, err := getRequiredEnv("S3_BUCKET")
+	s3InputBucket, err := getRequiredEnv("S3_INPUT_BUCKET")
+	if err != nil {
+		return nil, err
+	}
+	s3OutputBucket, err := getRequiredEnv("S3_OUTPUT_BUCKET")
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +199,8 @@ func Load() (*Config, error) {
 		},
 		S3: S3Config{
 			Region:          s3Region,
-			Bucket:          s3Bucket,
+			InputBucket:     s3InputBucket,
+			OutputBucket:    s3OutputBucket,
 			Endpoint:        getEnv("S3_ENDPOINT", ""),
 			AccessKeyID:     getEnv("S3_ACCESS_KEY_ID", ""),
 			SecretAccessKey: getEnv("S3_SECRET_ACCESS_KEY", ""),

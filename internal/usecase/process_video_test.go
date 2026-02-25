@@ -102,12 +102,20 @@ func (p *fakePublisher) PublishVideoFailed(_ context.Context, message port.Video
 
 func TestProcessVideoUseCase_ExecuteSuccess(t *testing.T) {
 	repo := newInMemoryRepo()
-	storage := &fakeStorage{}
+	inputStorage := &fakeStorage{}
+	outputStorage := &fakeStorage{}
 	processor := &fakeProcessor{frameCount: 12}
 	publisher := &fakePublisher{}
 	clock := &fakeClock{current: time.Date(2026, 2, 24, 10, 0, 0, 0, time.UTC)}
 
-	uc := NewProcessVideoUseCase(repo, storage, processor, publisher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	uc := NewProcessVideoUseCase(
+		repo,
+		inputStorage,
+		outputStorage,
+		processor,
+		publisher,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
 	uc.clock = clock
 
 	message := port.VideoProcessMessage{
@@ -145,16 +153,30 @@ func TestProcessVideoUseCase_ExecuteSuccess(t *testing.T) {
 	if len(publisher.failed) != 0 {
 		t.Fatalf("expected no failed events, got %d", len(publisher.failed))
 	}
+	if len(outputStorage.uploads) != 1 {
+		t.Fatalf("expected one uploaded zip, got %d", len(outputStorage.uploads))
+	}
+	if got, want := outputStorage.uploads[0], "550e8400-e29b-41d4-a716-446655440000/frames.zip"; got != want {
+		t.Fatalf("expected zip upload key %q, got %q", want, got)
+	}
 }
 
 func TestProcessVideoUseCase_ExecuteMarksFailedOnDownloadError(t *testing.T) {
 	repo := newInMemoryRepo()
-	storage := &fakeStorage{downloadErr: errors.New("s3 unavailable")}
+	inputStorage := &fakeStorage{downloadErr: errors.New("s3 unavailable")}
+	outputStorage := &fakeStorage{}
 	processor := &fakeProcessor{frameCount: 10}
 	publisher := &fakePublisher{}
 	clock := &fakeClock{current: time.Date(2026, 2, 24, 10, 0, 0, 0, time.UTC)}
 
-	uc := NewProcessVideoUseCase(repo, storage, processor, publisher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	uc := NewProcessVideoUseCase(
+		repo,
+		inputStorage,
+		outputStorage,
+		processor,
+		publisher,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
 	uc.clock = clock
 
 	message := port.VideoProcessMessage{
@@ -204,13 +226,14 @@ func TestProcessVideoUseCase_ExecuteIgnoresTerminalDuplicate(t *testing.T) {
 	if err := job.MarkProcessing(now.Add(1 * time.Second)); err != nil {
 		t.Fatalf("unexpected mark processing error: %v", err)
 	}
-	if err := job.MarkCompleted("videos/video-dup/frames.zip", 5, now.Add(2*time.Second)); err != nil {
+	if err := job.MarkCompleted("video-dup/frames.zip", 5, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("unexpected mark completed error: %v", err)
 	}
 	repo.byVideoID["video-dup"] = job
 
 	uc := NewProcessVideoUseCase(
 		repo,
+		&fakeStorage{},
 		&fakeStorage{},
 		&fakeProcessor{frameCount: 5},
 		&fakePublisher{},
@@ -233,9 +256,9 @@ func TestOutputZipKey(t *testing.T) {
 		input   string
 		wantKey string
 	}{
-		{"normal key", "videos/123/original.mp4", "videos/123/frames.zip"},
+		{"normal id", "123", "123/frames.zip"},
+		{"trimmed id", "  video-123  ", "video-123/frames.zip"},
 		{"empty key", "", "frames.zip"},
-		{"root file", "original.mp4", "frames.zip"},
 	}
 
 	for _, tt := range tests {

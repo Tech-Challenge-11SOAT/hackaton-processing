@@ -26,18 +26,20 @@ func (realClock) Now() time.Time {
 
 // ProcessVideoUseCase orchestrates end-to-end processing for one video message.
 type ProcessVideoUseCase struct {
-	repository port.ProcessingJobRepository
-	storage    port.ObjectStorage
-	processor  port.VideoProcessor
-	publisher  port.EventPublisher
-	logger     *slog.Logger
-	clock      Clock
+	repository    port.ProcessingJobRepository
+	inputStorage  port.ObjectStorage
+	outputStorage port.ObjectStorage
+	processor     port.VideoProcessor
+	publisher     port.EventPublisher
+	logger        *slog.Logger
+	clock         Clock
 }
 
 // NewProcessVideoUseCase creates the use case for video processing orchestration.
 func NewProcessVideoUseCase(
 	repository port.ProcessingJobRepository,
-	storage port.ObjectStorage,
+	inputStorage port.ObjectStorage,
+	outputStorage port.ObjectStorage,
 	processor port.VideoProcessor,
 	publisher port.EventPublisher,
 	logger *slog.Logger,
@@ -47,12 +49,13 @@ func NewProcessVideoUseCase(
 	}
 
 	return &ProcessVideoUseCase{
-		repository: repository,
-		storage:    storage,
-		processor:  processor,
-		publisher:  publisher,
-		logger:     logger,
-		clock:      realClock{},
+		repository:    repository,
+		inputStorage:  inputStorage,
+		outputStorage: outputStorage,
+		processor:     processor,
+		publisher:     publisher,
+		logger:        logger,
+		clock:         realClock{},
 	}
 }
 
@@ -109,7 +112,7 @@ func (u *ProcessVideoUseCase) Execute(ctx context.Context, message port.VideoPro
 	inputPath := filepath.Join(workDir, "input-video")
 	zipPath := filepath.Join(workDir, "frames.zip")
 
-	if err := u.storage.Download(ctx, message.S3VideoKey, inputPath); err != nil {
+	if err := u.inputStorage.Download(ctx, message.S3VideoKey, inputPath); err != nil {
 		_ = u.failJob(ctx, job, message, fmt.Sprintf("download input video: %v", err))
 		return fmt.Errorf("download input video: %w", err)
 	}
@@ -120,8 +123,8 @@ func (u *ProcessVideoUseCase) Execute(ctx context.Context, message port.VideoPro
 		return fmt.Errorf("extract frames: %w", err)
 	}
 
-	zipKey := outputZipKey(message.S3VideoKey)
-	if err := u.storage.Upload(ctx, zipPath, zipKey); err != nil {
+	zipKey := outputZipKey(message.VideoID)
+	if err := u.outputStorage.Upload(ctx, zipPath, zipKey); err != nil {
 		_ = u.failJob(ctx, job, message, fmt.Sprintf("upload zip: %v", err))
 		return fmt.Errorf("upload zip: %w", err)
 	}
@@ -196,16 +199,12 @@ func (u *ProcessVideoUseCase) publishStatus(
 	})
 }
 
-func outputZipKey(s3VideoKey string) string {
-	cleaned := strings.TrimSpace(s3VideoKey)
+func outputZipKey(videoID string) string {
+	cleaned := strings.TrimSpace(videoID)
 	if cleaned == "" {
 		return "frames.zip"
 	}
-	dir := filepath.Dir(cleaned)
-	if dir == "." || dir == "/" {
-		return "frames.zip"
-	}
-	return filepath.ToSlash(filepath.Join(dir, "frames.zip"))
+	return filepath.ToSlash(filepath.Join(cleaned, "frames.zip"))
 }
 
 func createWorkDir() (string, error) {

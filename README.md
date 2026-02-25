@@ -34,7 +34,8 @@ cp .env.example .env
 - `POSTGRES_URL`
 - `RABBITMQ_URL`
 - `S3_REGION`
-- `S3_BUCKET`
+- `S3_INPUT_BUCKET`
+- `S3_OUTPUT_BUCKET`
 - `WORKER_FFMPEG_BIN` (se `ffmpeg` nao estiver no PATH)
 
 Para ambiente S3 compativel (ex.: MinIO/LocalStack), configure tambem:
@@ -80,7 +81,7 @@ curl http://localhost:8080/ready
 Fluxo resumido:
 
 1. Subir PostgreSQL e RabbitMQ.
-2. Garantir bucket e credenciais S3.
+2. Garantir buckets e credenciais S3.
 3. Aplicar migration.
 4. Subir o servico.
 5. Publicar mensagem `video.process`.
@@ -92,7 +93,7 @@ Guia detalhado: [docs/E2E_SMOKE_TEST.md](docs/E2E_SMOKE_TEST.md)
 
 ## Docker Compose (E2E com video real)
 
-Suba tudo (PostgreSQL, RabbitMQ, MinIO, migration e app):
+Suba tudo (PostgreSQL, RabbitMQ, LocalStack S3, migration e app):
 
 ```bash
 docker compose up --build
@@ -102,18 +103,18 @@ Servicos e portas:
 
 - App: `http://localhost:8080`
 - RabbitMQ UI: `http://localhost:15672` (`guest` / `guest`)
-- MinIO API: `http://localhost:9000`
-- MinIO Console: `http://localhost:9001` (`minioadmin` / `minioadmin`)
+- LocalStack (S3): `http://localhost:4566`
 - PostgreSQL: `localhost:5432`
 
 ### Como testar com um video real
 
-1. Envie um video para o bucket no MinIO:
+1. Envie um video para o bucket de entrada no LocalStack S3:
 
 ```bash
-docker run --rm --network host -v "$PWD:/work" minio/mc:latest \
-  sh -c "mc alias set local http://127.0.0.1:9000 minioadmin minioadmin && \
-  mc cp /work/seu-video.mp4 local/${S3_BUCKET:-processing-videos}/videos/550e8400-e29b-41d4-a716-446655440000/original.mp4"
+docker run --rm --network host -v "$PWD:/work" \
+  -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1 \
+  amazon/aws-cli:latest --endpoint-url http://127.0.0.1:4566 \
+  s3 cp /work/seu-video.mp4 s3://${S3_INPUT_BUCKET:-videos}/videos/550e8400-e29b-41d4-a716-446655440000/original.mp4
 ```
 
 2. Publique uma mensagem na fila `video.process`:
@@ -137,7 +138,14 @@ docker logs processing-service --tail 200
 docker exec -it processing-postgres psql -U postgres -d processing_db -c "SELECT video_id,status,s3_zip_key,error_message,frame_count,updated_at FROM processing_jobs ORDER BY created_at DESC LIMIT 10;"
 ```
 
-4. Confira o arquivo ZIP no MinIO Console (`http://localhost:9001`).
+4. Confira o arquivo ZIP gerado no bucket de saida no LocalStack:
+
+```bash
+docker run --rm --network host \
+  -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1 \
+  amazon/aws-cli:latest --endpoint-url http://127.0.0.1:4566 \
+  s3 ls s3://${S3_OUTPUT_BUCKET:-processing-videos}/videos/550e8400-e29b-41d4-a716-446655440000/
+```
 
 ## Qualidade e testes
 

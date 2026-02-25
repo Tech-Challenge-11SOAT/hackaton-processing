@@ -72,9 +72,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	s3Storage, err := s3adapter.NewStorage(cfg.S3.Bucket, s3Client)
+	inputS3Storage, err := s3adapter.NewStorage(cfg.S3.InputBucket, s3Client)
 	if err != nil {
-		logger.Error("failed to create s3 storage adapter", "error", err)
+		logger.Error("failed to create input s3 storage adapter", "error", err)
+		os.Exit(1)
+	}
+
+	outputS3Storage, err := s3adapter.NewStorage(cfg.S3.OutputBucket, s3Client)
+	if err != nil {
+		logger.Error("failed to create output s3 storage adapter", "error", err)
 		os.Exit(1)
 	}
 
@@ -87,7 +93,8 @@ func main() {
 	jobRepository := postgres.NewRepository(postgresPool)
 	processUseCase := usecase.NewProcessVideoUseCase(
 		jobRepository,
-		s3Storage,
+		inputS3Storage,
+		outputS3Storage,
 		videoProcessor,
 		rabbitAdapter,
 		logger,
