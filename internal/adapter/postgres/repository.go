@@ -154,6 +154,9 @@ func (r *Repository) FindByVideoID(ctx context.Context, videoID string) (*domain
 		&job.UpdatedAt,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("find processing job by video_id: %w", err)
 	}
 
