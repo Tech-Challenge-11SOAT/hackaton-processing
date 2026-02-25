@@ -94,7 +94,17 @@ func main() {
 	)
 	videoWorker := worker.NewVideoProcessWorker(rabbitAdapter, processUseCase, logger)
 
-	server := httpserver.New(cfg.HTTP, logger)
+	readinessChecker := func(ctx context.Context) error {
+		if err := postgresPool.Ping(ctx); err != nil {
+			return fmt.Errorf("postgres not ready: %w", err)
+		}
+		if rabbitConn.IsClosed() {
+			return errors.New("rabbitmq not ready: connection is closed")
+		}
+		return nil
+	}
+
+	server := httpserver.New(cfg.HTTP, logger, readinessChecker)
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
