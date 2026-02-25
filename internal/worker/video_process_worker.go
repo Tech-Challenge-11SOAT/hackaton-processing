@@ -6,20 +6,24 @@ import (
 	"log/slog"
 
 	"github.com/thiagomartins/hackaton-processing/internal/port"
-	"github.com/thiagomartins/hackaton-processing/internal/usecase"
 )
+
+// VideoProcessExecutor abstracts the processing use case execution.
+type VideoProcessExecutor interface {
+	Execute(ctx context.Context, message port.VideoProcessMessage) error
+}
 
 // VideoProcessWorker binds queue consumption to the processing use case.
 type VideoProcessWorker struct {
 	consumer port.VideoProcessConsumer
-	useCase  *usecase.ProcessVideoUseCase
+	useCase  VideoProcessExecutor
 	logger   *slog.Logger
 }
 
 // NewVideoProcessWorker creates a new worker instance.
 func NewVideoProcessWorker(
 	consumer port.VideoProcessConsumer,
-	useCase *usecase.ProcessVideoUseCase,
+	useCase VideoProcessExecutor,
 	logger *slog.Logger,
 ) *VideoProcessWorker {
 	if logger == nil {
