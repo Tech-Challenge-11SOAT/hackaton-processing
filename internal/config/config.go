@@ -1,11 +1,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // Config groups all service configurations.
@@ -30,6 +33,10 @@ type LogConfig struct {
 
 // Load reads and validates configuration from environment variables.
 func Load() (*Config, error) {
+	if err := loadDotEnv(); err != nil {
+		return nil, err
+	}
+
 	readTimeout, err := getDurationEnv("HTTP_READ_TIMEOUT", "10s")
 	if err != nil {
 		return nil, err
@@ -67,6 +74,18 @@ func Load() (*Config, error) {
 			Level: level,
 		},
 	}, nil
+}
+
+func loadDotEnv() error {
+	err := godotenv.Load(".env")
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	return fmt.Errorf("failed to load .env file: %w", err)
 }
 
 func getEnv(key, fallback string) string {

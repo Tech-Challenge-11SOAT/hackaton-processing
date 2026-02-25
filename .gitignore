@@ -1,1 +1,8 @@
+# IDEs
 .cursor
+
+# Coverage
+coverage.out
+
+# Environment variables
+.env
