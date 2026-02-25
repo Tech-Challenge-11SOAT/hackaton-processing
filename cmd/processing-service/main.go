@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -91,37 +92,69 @@ func main() {
 		rabbitAdapter,
 		logger,
 	)
-	_ = worker.NewVideoProcessWorker(rabbitAdapter, processUseCase, logger)
+	videoWorker := worker.NewVideoProcessWorker(rabbitAdapter, processUseCase, logger)
 
 	server := httpserver.New(cfg.HTTP, logger)
 
-	serverErr := make(chan error, 1)
-	go func() {
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
+	componentErr := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
 		if err := server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErr <- err
+			componentErr <- fmt.Errorf("http server failed: %w", err)
 		}
-	}()
+	})
+
+	wg.Go(func() {
+		if err := videoWorker.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			componentErr <- fmt.Errorf("worker failed: %w", err)
+		}
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var exitErr error
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
-	case err := <-serverErr:
-		logger.Error("server exited with error", "error", err)
-		os.Exit(1)
+	case err := <-componentErr:
+		exitErr = err
+		logger.Error("component exited with error", "error", err)
 	}
+
+	runCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
-		os.Exit(1)
+		if exitErr == nil {
+			exitErr = err
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-shutdownCtx.Done():
+		logger.Warn("timeout waiting goroutines to stop", "error", shutdownCtx.Err())
 	}
 
 	logger.Info("processing service stopped gracefully")
+
+	if exitErr != nil {
+		os.Exit(1)
+	}
 }
 
 func newPostgresPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
