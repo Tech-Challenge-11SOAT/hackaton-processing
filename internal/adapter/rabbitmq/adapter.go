@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -116,6 +117,13 @@ func (a *Adapter) ConsumeVideoProcess(
 
 			message, err := decodeVideoProcessMessage(delivery.Body)
 			if err != nil {
+				slog.Default().Error(
+					"failed to decode video.process message",
+					"error", err,
+					"consumer_tag", a.config.ConsumerTag,
+					"queue", a.config.VideoProcessQueue,
+					"payload", string(delivery.Body),
+				)
 				_ = delivery.Nack(false, false)
 				continue
 			}
@@ -192,15 +200,59 @@ func withDefaults(cfg Config) Config {
 }
 
 func decodeVideoProcessMessage(body []byte) (port.VideoProcessMessage, error) {
-	var message port.VideoProcessMessage
-	if err := json.Unmarshal(body, &message); err != nil {
+	var payload struct {
+		VideoID           string `json:"videoId"`
+		UserID            string `json:"userId"`
+		S3VideoKey        string `json:"s3VideoKey"`
+		OriginalFilename  string `json:"originalFilename"`
+		OriginalFileName  string `json:"originalFileName"`
+		CreatedAt         string `json:"createdAt"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return port.VideoProcessMessage{}, fmt.Errorf("unmarshal video.process message: %w", err)
 	}
-	if strings.TrimSpace(message.VideoID) == "" {
+
+	if strings.TrimSpace(payload.VideoID) == "" {
 		return port.VideoProcessMessage{}, errors.New("videoId is required")
 	}
-	if strings.TrimSpace(message.S3VideoKey) == "" {
+	if strings.TrimSpace(payload.S3VideoKey) == "" {
 		return port.VideoProcessMessage{}, errors.New("s3VideoKey is required")
 	}
-	return message, nil
+
+	createdAt, err := parseCreatedAt(payload.CreatedAt)
+	if err != nil {
+		return port.VideoProcessMessage{}, err
+	}
+
+	originalFilename := payload.OriginalFilename
+	if strings.TrimSpace(originalFilename) == "" {
+		originalFilename = payload.OriginalFileName
+	}
+
+	return port.VideoProcessMessage{
+		VideoID:          payload.VideoID,
+		UserID:           payload.UserID,
+		S3VideoKey:       payload.S3VideoKey,
+		OriginalFilename: originalFilename,
+		CreatedAt:        createdAt,
+	}, nil
+}
+
+func parseCreatedAt(raw string) (time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339Nano, trimmed)
+	if err == nil {
+		return parsed, nil
+	}
+
+	parsed, err = time.ParseInLocation("2006-01-02T15:04:05.9999999", trimmed, time.UTC)
+	if err == nil {
+		return parsed, nil
+	}
+
+	return time.Time{}, fmt.Errorf("invalid createdAt, expected RFC3339 or yyyy-mm-ddThh:mm:ss.fffffff: %w", err)
 }
