@@ -37,7 +37,7 @@ jobs:
         run: go build ./...
 
       - name: Rodar testes + coverage
-        run: go test ./... -coverprofile=coverage.out -covermode=atomic
+        run: go test ./... -coverprofile=coverage.out
 
       - name: Verificar coverage.out
         run: ls -la coverage.out
