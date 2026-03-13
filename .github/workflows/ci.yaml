@@ -1,0 +1,64 @@
+name: Go CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  build-test:
+    name: Build + Testes + Coverage + Sonar
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Verificar versão do Go
+        run: go version
+
+      - name: Baixar dependências
+        run: go mod download
+
+      - name: Validar build
+        run: go build ./...
+
+      - name: Rodar testes + coverage
+        run: go test ./... -coverprofile=coverage.out
+
+      - name: Verificar coverage.out
+        run: ls -la coverage.out
+
+      - name: Validar build da imagem Docker
+        run: docker build -t app-ci:${{ github.sha }} .
+
+      - name: Upload dos resultados de coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-coverage
+          path: coverage.out
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=SEU_PROJECT_KEY
+            -Dsonar.organization=SUA_ORG
+            -Dsonar.sources=.
+            -Dsonar.go.coverage.reportPaths=coverage.out
