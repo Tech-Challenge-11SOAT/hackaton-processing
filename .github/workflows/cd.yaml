@@ -38,6 +38,6 @@ jobs:
       - name: Build e Push da imagem
         run: |
           IMAGE=nicolasmartinss/hackaton-processing:${{ github.sha }}
-          docker build -t $IMAGE -f docker/Dockerfile .
+          docker build -t $IMAGE .
           docker push $IMAGE
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
